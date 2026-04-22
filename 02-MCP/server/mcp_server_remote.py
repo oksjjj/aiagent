@@ -1,3 +1,6 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_community.vectorstores import FAISS
@@ -27,10 +30,28 @@ def create_retriever() -> Any:
 
 
 # Initialize FastMCP server with configuration
+# 노트북의 streamable_http 클라이언트(http://127.0.0.1:8002/mcp)와 맞춥니다.
 mcp = FastMCP(
     "Retriever",
-    instructions="A Retriever that can retrieve information from the database.",
+    instructions=(
+        "You expose get_current_time for the user's local time questions, "
+        "and retrieve for searching the PDF knowledge base."
+    ),
+    host="127.0.0.1",
+    port=8002,
+    streamable_http_path="/mcp",
 )
+
+
+@mcp.tool()
+async def get_current_time(timezone_name: str = "Asia/Seoul") -> str:
+    """Return the current date and time in the given IANA timezone (default: Asia/Seoul)."""
+    try:
+        tz = ZoneInfo(timezone_name)
+    except Exception:
+        tz = ZoneInfo("Asia/Seoul")
+    now = datetime.now(tz)
+    return now.strftime("%Y-%m-%d %H:%M:%S %Z (UTC%z)")
 
 
 @mcp.tool()
@@ -57,5 +78,5 @@ async def retrieve(query: str) -> str:
 
 
 if __name__ == "__main__":
-    # Run the MCP server with stdio transport for integration with MCP clients
-    mcp.run(transport="stdio")
+    # Streamable HTTP (uvicorn) — MultiServerMCPClient의 transport="streamable_http"와 대응
+    mcp.run(transport="streamable-http")

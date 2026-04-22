@@ -16,7 +16,8 @@ class RetrievalChain(ABC):
     def __init__(self):
         self.source_uri = None
         self.k = 8
-        self.model_name = "openai/gpt-4.1"
+        # 공식 OpenAI API 모델명 (OpenRouter 스타일의 "openai/..." 접두사 없음)
+        self.model_name = os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1")
         self.temperature = 0
         self.prompt = "teddynote/rag-prompt"
         self.embeddings = "text-embedding-3-small"
@@ -37,17 +38,29 @@ class RetrievalChain(ABC):
         """text splitter를 사용하여 문서를 분할합니다."""
         return text_splitter.split_documents(docs)
 
+    def _embedding_openai_kwargs(self) -> dict:
+        """OpenAI 임베딩. 기본은 공식 API(``base_url`` 미설정 = api.openai.com).
+
+        자체 호스팅·Azure 등 OpenAI 호환 엔드포인트만 쓸 때 ``OPENAI_BASE_URL``을 설정합니다.
+        (``EMBEDDING_BASE_URL``은 사용하지 않습니다. 공식 API만 쓰면 .env에서 제거하세요.)
+        """
+        api_key = os.getenv("EMBEDDING_API_KEY") or os.getenv("OPENAI_API_KEY")
+        kwargs: dict = {
+            "model": self.embeddings,
+            "api_key": api_key,
+        }
+        raw_base = os.getenv("OPENAI_BASE_URL")
+        if raw_base and str(raw_base).strip():
+            kwargs["base_url"] = str(raw_base).strip()
+        return kwargs
+
     def create_embedding(self):
         try:
             # 캐시 디렉토리 생성
             self.cache_dir.mkdir(parents=True, exist_ok=True)
 
             # 기본 임베딩 모델 생성
-            underlying_embeddings = OpenAIEmbeddings(
-                model=self.embeddings,  # 모델명 입력 (text-embedding-3-small / text-embedding-3-large)
-                api_key=os.getenv("OPENROUTER_API_KEY"),
-                base_url=os.getenv("EMBEDDING_BASE_URL"),
-            )
+            underlying_embeddings = OpenAIEmbeddings(**self._embedding_openai_kwargs())
 
             # 파일 기반 캐시 스토어 생성
             store = LocalFileStore(str(self.cache_dir))
@@ -65,11 +78,7 @@ class RetrievalChain(ABC):
         except Exception as e:
             print(f"Warning: Failed to create cached embeddings: {e}")
             print("Falling back to basic OpenAI embeddings without caching")
-            return OpenAIEmbeddings(
-                model=self.embeddings,  # 모델명 입력 (text-embedding-3-small / text-embedding-3-large)
-                api_key=os.getenv("OPENROUTER_API_KEY"),
-                base_url=os.getenv("EMBEDDING_BASE_URL"),
-            )
+            return OpenAIEmbeddings(**self._embedding_openai_kwargs())
 
     def create_vectorstore(self, split_docs):
         try:
@@ -136,12 +145,16 @@ class RetrievalChain(ABC):
         return dense_retriever
 
     def create_model(self):
-        return ChatOpenAI(
-            temperature=self.temperature,
-            model_name=self.model_name,  # OpenRouter에서 제공하는 GPT-4.1 모델
-            api_key=os.getenv("OPENROUTER_API_KEY"),  # OpenRouter API 키
-            base_url=os.getenv("OPENROUTER_BASE_URL"),  # OpenRouter API URL
-        )
+        kwargs: dict = {
+            "temperature": self.temperature,
+            "model": self.model_name,
+            "api_key": os.getenv("OPENAI_API_KEY"),
+        }
+        # 채팅만 별도 게이트웨이를 쓸 때(임베딩용 EMBEDDING_BASE_URL과 분리)
+        raw_base = os.getenv("OPENAI_BASE_URL")
+        if raw_base and str(raw_base).strip():
+            kwargs["base_url"] = str(raw_base).strip()
+        return ChatOpenAI(**kwargs)
 
     def create_prompt(self):
         return hub.pull(self.prompt)

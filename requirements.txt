@@ -11,3 +11,4 @@ pdfplumber==0.11.7
 faiss-cpu==1.12.0
 langchain-mcp-adapters==0.1.9
 fastmcp==2.12.4
+streamlit==1.48.1
